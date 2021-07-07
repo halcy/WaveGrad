@@ -4,6 +4,7 @@ np.random.seed(1234)
 import torch
 import torchaudio
 from torchaudio.transforms import MelSpectrogram
+import librosa
 
 from utils import parse_filelist
 
@@ -38,6 +39,29 @@ class AudioDataset(torch.utils.data.Dataset):
         audio_path = self.audio_paths[index]
         audio, sample_rate = self.load_audio_to_torch(audio_path)
 
+        if self.training:
+            # Normalize and do amplitude augmentation
+            audio_max = audio.abs().max()
+            audio = audio / audio_max
+            vol_aug_factor = float(1.0 - min((torch.randn(1) * 0.5).abs(), 0.8))
+            audio = audio * vol_aug_factor
+
+            # Pitch-shift augmentation
+            audio = librosa.effects.pitch_shift(audio.numpy(), sample_rate, torch.randn(1) * 2.0)
+
+            # Time-stretch augmentation
+            stretch_aug_factor = float(max(min(torch.randn(1) * 0.5 + 1.0, 2.0), 0.5))
+            audio = librosa.effects.time_stretch(audio, stretch_aug_factor)
+
+            # Sign flip augmentation (phase inversion)
+            audio = audio * (-1.0 if torch.randn(1) > 0.0 else 1.0)
+
+            # Teensy bit of noise aug
+            audio += torch.randn(audio.shape).numpy() * 0.0001
+            
+            # Back to Torch
+            audio = torch.Tensor(audio)
+            
         assert sample_rate == self.sample_rate, \
             f"""Got path to audio of sampling rate {sample_rate}, \
                 but required {self.sample_rate} according config."""
