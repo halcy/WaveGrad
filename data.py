@@ -18,7 +18,8 @@ class AudioDataset(torch.utils.data.Dataset):
         self.config = config
         self.hop_length = config.data_config.hop_length
         self.training = training
-
+        self.data_cache = []
+        
         if self.training:
             self.segment_length = config.training_config.segment_length
         self.sample_rate = config.data_config.sample_rate
@@ -36,36 +37,46 @@ class AudioDataset(torch.utils.data.Dataset):
         return audio.squeeze(), sample_rate
 
     def __getitem__(self, index):
-        audio_path = self.audio_paths[index]
-        audio, sample_rate = self.load_audio_to_torch(audio_path)
+        audio = None
+        sample_rate = 0
+        if len(self.data_cache) > 1000 and self.training and np.random.random() <= 0.95:
+            audio = self.data_cache[np.random.randint(len(self.data_cache))]
+            sample_rate = self.sample_rate
+        else:
+            audio_path = self.audio_paths[index]
+            audio, sample_rate = self.load_audio_to_torch(audio_path)
 
-        if self.training:
-            # Normalize and do amplitude augmentation
-            audio_max = audio.abs().max()
-            audio = audio / audio_max
-            vol_aug_factor = float(1.0 - min((torch.randn(1) * 0.5).abs(), 0.8))
-            audio = audio * vol_aug_factor
+            if self.training:
+                # Normalize and do amplitude augmentation
+                audio_max = audio.abs().max()
+                audio = audio / audio_max
+                vol_aug_factor = float(1.0 - min((torch.randn(1) * 0.5).abs(), 0.8))
+                audio = audio * vol_aug_factor
 
-            # Pitch-shift augmentation
-            audio = librosa.effects.pitch_shift(audio.numpy(), sample_rate, torch.randn(1) * 2.0)
+                # Pitch-shift augmentation
+                audio = librosa.effects.pitch_shift(audio.numpy(), sample_rate, torch.randn(1) * 2.0)
 
-            # Time-stretch augmentation
-            stretch_aug_factor = float(max(min(torch.randn(1) * 0.5 + 1.0, 2.0), 0.5))
-            audio = librosa.effects.time_stretch(audio, stretch_aug_factor)
+                # Time-stretch augmentation
+                stretch_aug_factor = float(max(min(torch.randn(1) * 0.5 + 1.0, 2.0), 0.5))
+                audio = librosa.effects.time_stretch(audio, stretch_aug_factor)
 
-            # Sign flip augmentation (phase inversion)
-            audio = audio * (-1.0 if torch.randn(1) > 0.0 else 1.0)
+                # Sign flip augmentation (phase inversion)
+                audio = audio * (-1.0 if torch.randn(1) > 0.0 else 1.0)
 
-            # Teensy bit of noise aug
-            audio += torch.randn(audio.shape).numpy() * 0.0001
+                # Teensy bit of noise aug
+                audio += torch.randn(audio.shape).numpy() * 0.0001
+                
+                # Back to Torch
+                audio = torch.Tensor(audio)
+                
+            assert sample_rate == self.sample_rate, \
+                f"""Got path to audio of sampling rate {sample_rate}, \
+                    but required {self.sample_rate} according config."""
             
-            # Back to Torch
-            audio = torch.Tensor(audio)
+            # whats thread safety
+            self.data_cache.append(audio)
+            self.data_cache = self.data_cache[-2500:]
             
-        assert sample_rate == self.sample_rate, \
-            f"""Got path to audio of sampling rate {sample_rate}, \
-                but required {self.sample_rate} according config."""
-
         if not self.training:  # If test
             return audio
         # Take segment of audio for training
