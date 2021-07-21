@@ -64,7 +64,7 @@ class AudioDataset(torch.utils.data.Dataset):
                 audio = audio * (-1.0 if torch.randn(1) > 0.0 else 1.0)
 
                 # Teensy bit of noise aug
-                audio += torch.randn(audio.shape).numpy() * 0.0001
+                audio += torch.randn(audio.shape).numpy() * 0.000001
                 
                 # Back to Torch
                 audio = torch.Tensor(audio)
